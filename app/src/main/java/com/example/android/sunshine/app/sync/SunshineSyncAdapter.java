@@ -30,6 +30,7 @@ import android.text.format.Time;
 import android.util.Log;
 
 import com.bumptech.glide.Glide;
+import com.bumptech.glide.util.Util;
 import com.example.android.sunshine.app.BuildConfig;
 import com.example.android.sunshine.app.MainActivity;
 import com.example.android.sunshine.app.R;
@@ -38,6 +39,7 @@ import com.example.android.sunshine.app.data.WeatherContract;
 import com.example.android.sunshine.app.muzei.WeatherMuzeiSource;
 import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.common.api.PendingResult;
+import com.google.android.gms.wearable.Asset;
 import com.google.android.gms.wearable.DataApi;
 import com.google.android.gms.wearable.PutDataMapRequest;
 import com.google.android.gms.wearable.PutDataRequest;
@@ -524,20 +526,25 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                     editor.putLong(lastNotificationKey, System.currentTimeMillis());
                     editor.commit();
                     //update the watch-face
-                    updateWatchFace(lowTemp, highTemp);
+                    updateWatchFace(lowTemp, highTemp, iconId);
                 }
                 cursor.close();
             }
         }
     }
 
-    private void updateWatchFace(String lowTemp, String highTemp) {
+    private void updateWatchFace(String lowTemp, String highTemp, int iconId) {
         Log.d("WATCH", "App: update watch-face");
+        //search for the weather icon
+        Bitmap weatherIcon = BitmapFactory.decodeResource(getContext().getResources(), iconId);
+        Asset weatherIconAsset = Utility.createAssetFromBitmap(weatherIcon);
+
         PutDataMapRequest putDataMapRequest = PutDataMapRequest.create("/sunshine");
         putDataMapRequest.getDataMap().putString(Utility.LOW_TEMP, lowTemp);
         putDataMapRequest.getDataMap().putString(Utility.HIGH_TEMP, highTemp);
-        putDataMapRequest.getDataMap().putLong("TIMESTAMP", new Date().getTime());
+        putDataMapRequest.getDataMap().putAsset(Utility.WEATHER_IMG, weatherIconAsset);
         PutDataRequest putDataRequest = putDataMapRequest.asPutDataRequest();
+
         //for the request to be sent immediately
         putDataRequest.setUrgent();
         PendingResult<DataApi.DataItemResult> pendingResult = Wearable.DataApi
