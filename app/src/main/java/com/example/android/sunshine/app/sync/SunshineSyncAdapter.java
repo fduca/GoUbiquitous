@@ -36,6 +36,12 @@ import com.example.android.sunshine.app.R;
 import com.example.android.sunshine.app.Utility;
 import com.example.android.sunshine.app.data.WeatherContract;
 import com.example.android.sunshine.app.muzei.WeatherMuzeiSource;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.PendingResult;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.PutDataMapRequest;
+import com.google.android.gms.wearable.PutDataRequest;
+import com.google.android.gms.wearable.Wearable;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -49,6 +55,7 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.Date;
 import java.util.Vector;
 import java.util.concurrent.ExecutionException;
 
@@ -60,7 +67,7 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
     // 60 seconds (1 minute) * 180 = 3 hours
     public static final int SYNC_INTERVAL = 60 * 180;
     public static final int SYNC_FLEXTIME = SYNC_INTERVAL/3;
-    private static final long DAY_IN_MILLIS = 1000 * 60 * 60 * 24;
+    private static final long DAY_IN_MILLIS = 0;//1000 * 60 * 60 * 24;
     private static final int WEATHER_NOTIFICATION_ID = 3004;
 
 
@@ -87,13 +94,23 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
     public static final int LOCATION_STATUS_UNKNOWN = 3;
     public static final int LOCATION_STATUS_INVALID = 4;
 
+    //PART RELATED TO THE WEAR-FACE
+    GoogleApiClient mGoogleApiClient;
+
     public SunshineSyncAdapter(Context context, boolean autoInitialize) {
         super(context, autoInitialize);
+        //initialize the googleapiclient
+        mGoogleApiClient = new GoogleApiClient.Builder(getContext())
+                .addApi(Wearable.API)
+                .build();
     }
 
     @Override
     public void onPerformSync(Account account, Bundle extras, String authority, ContentProviderClient provider, SyncResult syncResult) {
         Log.d(LOG_TAG, "Starting sync");
+        //connect the googleapiclient
+
+        mGoogleApiClient.connect();
 
         // We no longer need just the location String, but also potentially the latitude and
         // longitude, in case we are syncing based on a new Place Picker API result.
@@ -199,6 +216,10 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                 } catch (final IOException e) {
                     Log.e(LOG_TAG, "Error closing stream", e);
                 }
+            }
+            //disconnect googleapiclient
+            if (mGoogleApiClient != null && mGoogleApiClient.isConnected()){
+                mGoogleApiClient.disconnect();
             }
         }
         return;
@@ -456,12 +477,15 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                         largeIcon = BitmapFactory.decodeResource(resources, artResourceId);
                     }
                     String title = context.getString(R.string.app_name);
+                    //high and low temperature
+                    String lowTemp = Utility.formatTemperature(context, low);
+                    String highTemp = Utility.formatTemperature(context, high);
 
                     // Define the text of the forecast.
                     String contentText = String.format(context.getString(R.string.format_notification),
                             desc,
-                            Utility.formatTemperature(context, high),
-                            Utility.formatTemperature(context, low));
+                            highTemp,
+                            lowTemp);
 
                     // NotificationCompatBuilder is a very convenient way to build backward-compatible
                     // notifications.  Just throw in some data.
@@ -499,10 +523,33 @@ public class SunshineSyncAdapter extends AbstractThreadedSyncAdapter {
                     SharedPreferences.Editor editor = prefs.edit();
                     editor.putLong(lastNotificationKey, System.currentTimeMillis());
                     editor.commit();
+                    //update the watch-face
+                    updateWatchFace(lowTemp, highTemp);
                 }
                 cursor.close();
             }
         }
+    }
+
+    private void updateWatchFace(String lowTemp, String highTemp) {
+        Log.d("WATCH", "App: update watch-face");
+        PutDataMapRequest putDataMapRequest = PutDataMapRequest.create("/sunshine");
+        putDataMapRequest.getDataMap().putString(Utility.LOW_TEMP, lowTemp);
+        putDataMapRequest.getDataMap().putString(Utility.HIGH_TEMP, highTemp);
+        putDataMapRequest.getDataMap().putLong("TIMESTAMP", new Date().getTime());
+        PutDataRequest putDataRequest = putDataMapRequest.asPutDataRequest();
+        //for the request to be sent immediately
+        putDataRequest.setUrgent();
+        PendingResult<DataApi.DataItemResult> pendingResult = Wearable.DataApi
+                .putDataItem(mGoogleApiClient, putDataRequest);
+        Log.d("WATCH", "App: data sent to the watch face");
+        DataApi.DataItemResult dataItemResult = pendingResult.await();
+        if (dataItemResult.getStatus().isSuccess()){
+            Log.d("WATCH", "App: sent successful to the watch-face");
+        } else {
+            Log.d("WATCH", "App: something went wrong");
+        }
+
     }
 
     /**

@@ -29,11 +29,24 @@ import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.support.wearable.watchface.CanvasWatchFaceService;
 import android.support.wearable.watchface.WatchFaceStyle;
 import android.text.format.Time;
+import android.util.Log;
 import android.view.SurfaceHolder;
 import android.view.WindowInsets;
+
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.wearable.DataApi;
+import com.google.android.gms.wearable.DataEvent;
+import com.google.android.gms.wearable.DataEventBuffer;
+import com.google.android.gms.wearable.DataItem;
+import com.google.android.gms.wearable.DataMap;
+import com.google.android.gms.wearable.DataMapItem;
+import com.google.android.gms.wearable.Wearable;
 
 import java.lang.ref.WeakReference;
 import java.util.TimeZone;
@@ -83,13 +96,27 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         }
     }
 
-    private class Engine extends CanvasWatchFaceService.Engine {
+    private class Engine extends CanvasWatchFaceService.Engine implements
+            DataApi.DataListener,
+            GoogleApiClient.ConnectionCallbacks,
+            GoogleApiClient.OnConnectionFailedListener
+    {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
         Paint mTextPaint;
+        Paint mDatePaint;
         boolean mAmbient;
         Time mTime;
+
+        //to receive data from the handset
+        GoogleApiClient mGoogleApiClient;
+        String LOW_TEMP = "LOW_TEMP";
+        String HIGH_TEMP = "HIGH_TEMP";
+        String mHighTemp;
+        String mLowTemp;
+
+
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
@@ -99,6 +126,8 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         };
         float mXOffset;
         float mYOffset;
+        float mXDateOffset;
+        float mYDateOffset;
 
         /**
          * Whether the display supports fewer bits for each color in ambient mode. When true, we
@@ -115,21 +144,34 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                     .setBackgroundVisibility(WatchFaceStyle.BACKGROUND_VISIBILITY_INTERRUPTIVE)
                     .setShowSystemUiTime(false)
                     .build());
+            //instantiate google api client
+            mGoogleApiClient = new GoogleApiClient.Builder(getApplicationContext())
+                    .addApi(Wearable.API)
+                    .addConnectionCallbacks(Engine.this)
+                    .addOnConnectionFailedListener(Engine.this)
+                    .build();
+
             Resources resources = SunshineWatchFace.this.getResources();
             mYOffset = resources.getDimension(R.dimen.digital_y_offset);
-
+            mYDateOffset = resources.getDimension(R.dimen.digital_y_date_offset);
             mBackgroundPaint = new Paint();
             mBackgroundPaint.setColor(resources.getColor(R.color.background));
 
             mTextPaint = new Paint();
             mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
-
+            mDatePaint = new Paint();
+            mDatePaint = createTextPaint(resources.getColor(R.color.digital_date_text));
             mTime = new Time();
         }
 
         @Override
         public void onDestroy() {
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
+            //disconnect the google client api
+            Wearable.DataApi.removeListener(mGoogleApiClient, Engine.this);
+            if (mGoogleApiClient != null && mGoogleApiClient.isConnected()){
+                mGoogleApiClient.disconnect();
+            }
             super.onDestroy();
         }
 
@@ -147,12 +189,19 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
             if (visible) {
                 registerReceiver();
+                //connect google client api
+                mGoogleApiClient.connect();
 
                 // Update time zone in case it changed while we weren't visible.
                 mTime.clear(TimeZone.getDefault().getID());
                 mTime.setToNow();
             } else {
                 unregisterReceiver();
+                //disconnect google client api
+                Wearable.DataApi.removeListener(mGoogleApiClient, Engine.this);
+                if (mGoogleApiClient != null && mGoogleApiClient.isConnected()){
+                    mGoogleApiClient.disconnect();
+                }
             }
 
             // Whether the timer should be running depends on whether we're visible (as well as
@@ -186,10 +235,15 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             boolean isRound = insets.isRound();
             mXOffset = resources.getDimension(isRound
                     ? R.dimen.digital_x_offset_round : R.dimen.digital_x_offset);
+            mXDateOffset = resources.getDimension(isRound
+                    ? R.dimen.digital_x_date_offset_round : R.dimen.digital_x_date_offset);
             float textSize = resources.getDimension(isRound
                     ? R.dimen.digital_text_size_round : R.dimen.digital_text_size);
+            float dateSize = resources.getDimension(isRound
+                    ? R.dimen.digital_text_date_size_round : R.dimen.digital_text_date_size);
 
             mTextPaint.setTextSize(textSize);
+            mDatePaint.setTextSize(dateSize);
         }
 
         @Override
@@ -211,6 +265,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 mAmbient = inAmbientMode;
                 if (mLowBitAmbient) {
                     mTextPaint.setAntiAlias(!inAmbientMode);
+                    mDatePaint.setAntiAlias(!inAmbientMode);
                 }
                 invalidate();
             }
@@ -231,10 +286,11 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
 
             // Draw H:MM in ambient mode or H:MM:SS in interactive mode.
             mTime.setToNow();
-            String text = mAmbient
-                    ? String.format("%d:%02d", mTime.hour, mTime.minute)
-                    : String.format("%d:%02d:%02d", mTime.hour, mTime.minute, mTime.second);
+
+            String text = String.format("%d:%02d", mTime.hour, mTime.minute);
+            String date = Util.convertDate(mTime.weekDay, mTime.monthDay, mTime.month, mTime.year);
             canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
+            canvas.drawText(date, mXDateOffset, mYDateOffset, mDatePaint);
         }
 
         /**
@@ -267,6 +323,41 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                         - (timeMs % INTERACTIVE_UPDATE_RATE_MS);
                 mUpdateTimeHandler.sendEmptyMessageDelayed(MSG_UPDATE_TIME, delayMs);
             }
+        }
+
+        @Override
+        public void onConnected(@Nullable Bundle bundle) {
+            Log.d("WATCH", "Watch: on connected");
+            Wearable.DataApi.addListener(mGoogleApiClient, Engine.this);
+        }
+
+        @Override
+        public void onConnectionSuspended(int i) {
+            Log.d("WATCH", "Watch: on connection suspended");
+        }
+
+        @Override
+        public void onConnectionFailed(@NonNull ConnectionResult connectionResult) {
+            Log.d("WATCH", "Watch: on connection failed");
+        }
+
+        @Override
+        public void onDataChanged(DataEventBuffer dataEventBuffer) {
+            Log.d("WATCH", "Watch: on data changed");
+            for (DataEvent dataEvent : dataEventBuffer){
+                if (dataEvent.getType() == DataEvent.TYPE_CHANGED){
+                    DataItem item = dataEvent.getDataItem();
+                    if (item.getUri().getPath().compareTo("/sunshine")==0){
+                        DataMap dataMap = DataMapItem.fromDataItem(item).getDataMap();
+                        mLowTemp = dataMap.getString(LOW_TEMP);
+                        mHighTemp = dataMap.getString(HIGH_TEMP);
+                    }
+                }
+                else {
+                    Log.d("WATCH", "Watch:"+dataEvent.getType());
+                }
+            }
+
         }
     }
 }

@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <dimen name="digital_text_size">40dp</dimen>
-    <dimen name="digital_text_size_round">45dp</dimen>
-    <dimen name="digital_x_offset">15dp</dimen>
+    <dimen name="digital_text_size">35dp</dimen>
+    <dimen name="digital_text_size_round">35dp</dimen>
+    <dimen name="digital_x_offset">35dp</dimen>
     <dimen name="digital_x_offset_round">25dp</dimen>
-    <dimen name="digital_y_offset">90dp</dimen>
+    <dimen name="digital_y_offset">70dp</dimen>
+    <!-- date format -->
+    <dimen name="digital_y_date_offset">90dp</dimen>
+    <dimen name="digital_text_date_size">25dp</dimen>
+    <dimen name="digital_text_date_size_round">25dp</dimen>
+    <dimen name="digital_x_date_offset">35dp</dimen>
+    <dimen name="digital_x_date_offset_round">25dp</dimen>
 </resources>
