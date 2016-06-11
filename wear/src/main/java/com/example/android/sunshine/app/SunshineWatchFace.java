@@ -14,13 +14,15 @@
  * limitations under the License.
  */
 
-package com.example.android.sunshine.wear;
+package com.example.android.sunshine.app;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -40,6 +42,8 @@ import android.view.WindowInsets;
 
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.common.api.ResultCallback;
+import com.google.android.gms.wearable.Asset;
 import com.google.android.gms.wearable.DataApi;
 import com.google.android.gms.wearable.DataEvent;
 import com.google.android.gms.wearable.DataEventBuffer;
@@ -48,6 +52,7 @@ import com.google.android.gms.wearable.DataMap;
 import com.google.android.gms.wearable.DataMapItem;
 import com.google.android.gms.wearable.Wearable;
 
+import java.io.InputStream;
 import java.lang.ref.WeakReference;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
@@ -99,13 +104,17 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
     private class Engine extends CanvasWatchFaceService.Engine implements
             DataApi.DataListener,
             GoogleApiClient.ConnectionCallbacks,
-            GoogleApiClient.OnConnectionFailedListener
-    {
+            GoogleApiClient.OnConnectionFailedListener {
         final Handler mUpdateTimeHandler = new EngineHandler(this);
         boolean mRegisteredTimeZoneReceiver = false;
         Paint mBackgroundPaint;
         Paint mTextPaint;
         Paint mDatePaint;
+        Paint mLowTempPaint;
+        Paint mHighTempPaint;
+        Paint mWeatherIconPaint;
+
+
         boolean mAmbient;
         Time mTime;
 
@@ -113,8 +122,10 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         GoogleApiClient mGoogleApiClient;
         String LOW_TEMP = "LOW_TEMP";
         String HIGH_TEMP = "HIGH_TEMP";
-        String mHighTemp;
-        String mLowTemp;
+
+        String mHighTemp = "0";
+        String mLowTemp = "0";
+        Bitmap mWeatherIconBitmap;
 
 
         final BroadcastReceiver mTimeZoneReceiver = new BroadcastReceiver() {
@@ -161,6 +172,12 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             mTextPaint = createTextPaint(resources.getColor(R.color.digital_text));
             mDatePaint = new Paint();
             mDatePaint = createTextPaint(resources.getColor(R.color.digital_date_text));
+            mLowTempPaint = new Paint();
+            mLowTempPaint = createTextPaint(resources.getColor(R.color.digital_date_text));
+            mHighTempPaint = new Paint();
+            mHighTempPaint = createTextPaint(resources.getColor(R.color.digital_date_text));
+            mWeatherIconPaint = new Paint();
+            mWeatherIconPaint = createTextPaint(resources.getColor(R.color.digital_date_text));
             mTime = new Time();
         }
 
@@ -169,7 +186,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             mUpdateTimeHandler.removeMessages(MSG_UPDATE_TIME);
             //disconnect the google client api
             Wearable.DataApi.removeListener(mGoogleApiClient, Engine.this);
-            if (mGoogleApiClient != null && mGoogleApiClient.isConnected()){
+            if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
                 mGoogleApiClient.disconnect();
             }
             super.onDestroy();
@@ -199,7 +216,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 unregisterReceiver();
                 //disconnect google client api
                 Wearable.DataApi.removeListener(mGoogleApiClient, Engine.this);
-                if (mGoogleApiClient != null && mGoogleApiClient.isConnected()){
+                if (mGoogleApiClient != null && mGoogleApiClient.isConnected()) {
                     mGoogleApiClient.disconnect();
                 }
             }
@@ -291,6 +308,12 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
             String date = Util.convertDate(mTime.weekDay, mTime.monthDay, mTime.month, mTime.year);
             canvas.drawText(text, mXOffset, mYOffset, mTextPaint);
             canvas.drawText(date, mXDateOffset, mYDateOffset, mDatePaint);
+            canvas.drawText(mHighTemp,150, 200, mHighTempPaint);
+            canvas.drawText(mLowTemp, 200, 200, mLowTempPaint);
+
+            if (mWeatherIconBitmap != null) {
+                canvas.drawBitmap(mWeatherIconBitmap, 100, 200, null);
+            }
         }
 
         /**
@@ -344,20 +367,37 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         @Override
         public void onDataChanged(DataEventBuffer dataEventBuffer) {
             Log.d("WATCH", "Watch: on data changed");
-            for (DataEvent dataEvent : dataEventBuffer){
-                if (dataEvent.getType() == DataEvent.TYPE_CHANGED){
+            for (DataEvent dataEvent : dataEventBuffer) {
+                if (dataEvent.getType() == DataEvent.TYPE_CHANGED) {
                     DataItem item = dataEvent.getDataItem();
-                    if (item.getUri().getPath().compareTo("/sunshine")==0){
+                    if (item.getUri().getPath().compareTo("/sunshine") == 0) {
                         DataMap dataMap = DataMapItem.fromDataItem(item).getDataMap();
                         mLowTemp = dataMap.getString(LOW_TEMP);
                         mHighTemp = dataMap.getString(HIGH_TEMP);
+                        Asset weatherIconAsset = dataMap.getAsset("WEATHER_IMG");
+                        getBitmapFromAsset(weatherIconAsset);
                     }
-                }
-                else {
-                    Log.d("WATCH", "Watch:"+dataEvent.getType());
+                } else {
+                    Log.d("WATCH", "Watch:" + dataEvent.getType());
                 }
             }
 
+        }
+
+        private void getBitmapFromAsset(Asset weatherIconAsset) {
+            if (weatherIconAsset != null) {
+                Wearable.DataApi.getFdForAsset(mGoogleApiClient, weatherIconAsset)
+                        .setResultCallback(new ResultCallback<DataApi.GetFdForAssetResult>() {
+                            @Override
+                            public void onResult(@NonNull DataApi.GetFdForAssetResult getFdForAssetResult) {
+                                InputStream inputStream = getFdForAssetResult.getInputStream();
+                                if (inputStream != null) {
+                                    mWeatherIconBitmap = BitmapFactory.decodeStream(inputStream);
+                                }
+                            }
+                        });
+            }
+            return;
         }
     }
 }
