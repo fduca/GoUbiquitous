@@ -28,6 +28,7 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -50,6 +51,9 @@ import com.google.android.gms.wearable.DataEventBuffer;
 import com.google.android.gms.wearable.DataItem;
 import com.google.android.gms.wearable.DataMap;
 import com.google.android.gms.wearable.DataMapItem;
+import com.google.android.gms.wearable.Node;
+import com.google.android.gms.wearable.NodeApi;
+import com.google.android.gms.wearable.PutDataRequest;
 import com.google.android.gms.wearable.Wearable;
 
 import java.io.InputStream;
@@ -123,8 +127,8 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         String LOW_TEMP = "LOW_TEMP";
         String HIGH_TEMP = "HIGH_TEMP";
 
-        String mHighTemp = "0";
-        String mLowTemp = "0";
+        String mHighTemp="";
+        String mLowTemp="";
         Bitmap mWeatherIconBitmap;
 
 
@@ -351,6 +355,7 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
         @Override
         public void onConnected(@Nullable Bundle bundle) {
             Log.d("WATCH", "Watch: on connected");
+            getInitialData();
             Wearable.DataApi.addListener(mGoogleApiClient, Engine.this);
         }
 
@@ -382,6 +387,46 @@ public class SunshineWatchFace extends CanvasWatchFaceService {
                 }
             }
 
+        }
+
+        void getInitialData(){
+            Log.d("WATCH", "Watch: I am in the get Initial data");
+            Wearable.NodeApi.getConnectedNodes(mGoogleApiClient)
+                    .setResultCallback(new ResultCallback<NodeApi.GetConnectedNodesResult>() {
+                        @Override
+                        public void onResult(@NonNull NodeApi.GetConnectedNodesResult nodes) {
+                            Node node = null;
+                            Log.d("WATCH", "Watch:"+ nodes.getNodes().size());
+                            for (Node n : nodes.getNodes()){
+                                node = n;
+                            }
+                            if (node == null){
+                                return;
+                            }
+                            Uri uri = new Uri.Builder()
+                                    .scheme(PutDataRequest.WEAR_URI_SCHEME)
+                                    .path("/sunshine")
+                                    .authority(node.getId())
+                                    .build();
+                            Wearable.DataApi.getDataItem(mGoogleApiClient, uri)
+                                    .setResultCallback(new ResultCallback<DataApi.DataItemResult>() {
+                                        @Override
+                                        public void onResult(@NonNull DataApi.DataItemResult dataItemResult) {
+                                            Log.d("WATCH", "Watch: on result of call");
+
+                                            if (dataItemResult.getStatus().isSuccess() &&
+                                                    dataItemResult.getDataItem()!= null){
+                                                Log.d("WATCH", "Watch: on result of call and success");
+                                                DataMap dataMap = DataMapItem.fromDataItem(dataItemResult.getDataItem()).getDataMap();
+                                                mLowTemp = dataMap.getString(LOW_TEMP);
+                                                mHighTemp = dataMap.getString(HIGH_TEMP);
+                                                Asset weatherIconAsset = dataMap.getAsset("WEATHER_IMG");
+                                                getBitmapFromAsset(weatherIconAsset);
+                                            }
+                                        }
+                                    });
+                        }
+                    });
         }
 
         private void getBitmapFromAsset(Asset weatherIconAsset) {
