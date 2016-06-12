@@ -21,6 +21,7 @@ Getting Started
 ---------------
 This sample uses the Gradle build system.  To build this project, use the
 "gradlew build" command or use "Import Project" in Android Studio.
+Remeber to add your own weather api key under the build.gradle of the app module
 
 Support
 -------
